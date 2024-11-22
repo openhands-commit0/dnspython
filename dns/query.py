@@ -72,6 +72,80 @@ except ImportError:
             pass
 socket_factory = socket.socket
 
+def _compute_times(timeout: Optional[float]) -> Tuple[Optional[float], Optional[float]]:
+    """Return a tuple of the current time and the expiration time, based on
+    the current time and the specified timeout.  If timeout is None, None is
+    returned for the expiration time.
+
+    Returns a tuple of (float, float) or (float, None)
+    """
+    now = time.time()
+    if timeout is not None:
+        return (now, now + timeout)
+    return (now, None)
+
+def _remaining(expiration: Optional[float]) -> float:
+    """Return the amount of time remaining until the expiration time.
+
+    Returns a float or 0.0 if time has expired.
+    """
+    if expiration is None:
+        return 0.0
+    timeout = expiration - time.time()
+    if timeout <= 0.0:
+        return 0.0
+    else:
+        return timeout
+
+def _matches_destination(af: socket.AddressFamily, from_address: Any, destination: Any, ignore_scope: bool=False) -> bool:
+    """Is the address we got a response from the same address we sent to?
+    
+    Returns a bool.
+    """
+    if af == socket.AF_INET:
+        # Destination is a tuple of (ip, port)
+        return from_address[0] == destination[0]
+    elif af == socket.AF_INET6:
+        # Destination is a tuple of (ip, port, flow info, scope id)
+        if ignore_scope:
+            from_address = from_address[:3] + (0,)
+            destination = destination[:3] + (0,)
+        return from_address[0] == destination[0]
+    else:
+        return False
+
+def _destination_and_source(where: str, port: int, source: Optional[str], source_port: int, where_must_be_address: bool=True) -> Tuple[socket.AddressFamily, Any, Any]:
+    """Return a tuple of address family, destination, and source.
+    
+    Returns a tuple of (int, Any, Any)
+    """
+    af = None
+    destination = None
+    source_tuple = None
+
+    if where_must_be_address:
+        af = dns.inet.af_for_address(where)
+        destination = _lltuple((where, port))
+    else:
+        # We assume AF_INET if we don't know and are using a hostname
+        af = socket.AF_INET
+        destination = None
+
+    if source is not None:
+        af = dns.inet.af_for_address(source)
+        source_tuple = _lltuple((source, source_port))
+    elif source_port:
+        if af == socket.AF_INET:
+            source_tuple = ('0.0.0.0', source_port)
+        elif af == socket.AF_INET6:
+            source_tuple = ('::', source_port, 0, 0)
+        else:
+            raise ValueError('source_port specified but address family is unknown')
+
+    return (af, destination, source_tuple)
+
+socket_factory = socket.socket
+
 class UnexpectedSource(dns.exception.DNSException):
     """A DNS query response came from an unexpected address or port."""
 
@@ -149,14 +223,40 @@ def _udp_recv(sock, max_size, expiration):
     A Timeout exception will be raised if the operation is not completed
     by the expiration time.
     """
-    pass
+    while True:
+        if expiration is not None:
+            timeout = _remaining(expiration)
+            if timeout <= 0.0:
+                raise dns.exception.Timeout
+            sock.settimeout(timeout)
+        try:
+            return sock.recvfrom(max_size)
+        except socket.timeout:
+            raise dns.exception.Timeout
+        except socket.error as e:
+            if e.args[0] == errno.EINTR:
+                continue
+            raise
 
 def _udp_send(sock, data, destination, expiration):
     """Sends the specified datagram to destination over the socket.
     A Timeout exception will be raised if the operation is not completed
     by the expiration time.
     """
-    pass
+    while True:
+        if expiration is not None:
+            timeout = _remaining(expiration)
+            if timeout <= 0.0:
+                raise dns.exception.Timeout
+            sock.settimeout(timeout)
+        try:
+            return sock.sendto(data, destination)
+        except socket.timeout:
+            raise dns.exception.Timeout
+        except socket.error as e:
+            if e.args[0] == errno.EINTR:
+                continue
+            raise
 
 def send_udp(sock: Any, what: Union[dns.message.Message, bytes], destination: Any, expiration: Optional[float]=None) -> Tuple[int, float]:
     """Send a DNS message to the specified UDP socket.
@@ -174,7 +274,11 @@ def send_udp(sock: Any, what: Union[dns.message.Message, bytes], destination: An
 
     Returns an ``(int, float)`` tuple of bytes sent and the sent time.
     """
-    pass
+    if isinstance(what, dns.message.Message):
+        what = what.to_wire()
+    sent_time = time.time()
+    n = _udp_send(sock, what, destination, expiration)
+    return (n, sent_time)
 
 def receive_udp(sock: Any, destination: Optional[Any]=None, expiration: Optional[float]=None, ignore_unexpected: bool=False, one_rr_per_rrset: bool=False, keyring: Optional[Dict[dns.name.Name, dns.tsig.Key]]=None, request_mac: Optional[bytes]=b'', ignore_trailing: bool=False, raise_on_truncation: bool=False, ignore_errors: bool=False, query: Optional[dns.message.Message]=None) -> Any:
     """Read a DNS message from a UDP socket.
@@ -225,7 +329,40 @@ def receive_udp(sock: Any, destination: Optional[Any]=None, expiration: Optional
     *ignore_errors* is ``True``, check that the received message is a response
     to this query, and if not keep listening for a valid response.
     """
-    pass
+    while True:
+        wire = b''
+        try:
+            (wire, from_address) = _udp_recv(sock, 65535, expiration)
+        except dns.exception.Timeout:
+            raise
+        received_time = time.time()
+        if expiration is not None and received_time > expiration:
+            raise dns.exception.Timeout
+        if destination:
+            if not ignore_unexpected and not _matches_destination(sock.family, from_address, destination, True):
+                if not ignore_errors:
+                    raise UnexpectedSource('got a response from {} instead of {}'.format(from_address, destination))
+                continue
+        try:
+            r = dns.message.from_wire(wire, keyring=keyring, request_mac=request_mac,
+                                    one_rr_per_rrset=one_rr_per_rrset,
+                                    ignore_trailing=ignore_trailing)
+        except dns.message.TrailingJunk:
+            if not ignore_errors:
+                raise
+            continue
+        except dns.exception.FormError:
+            if not ignore_errors:
+                raise
+            continue
+        if query is not None and query.id != r.id:
+            if not ignore_errors:
+                raise BadResponse
+            continue
+        if destination is None:
+            return (r, received_time, from_address)
+        else:
+            return (r, received_time)
 
 def udp(q: dns.message.Message, where: str, timeout: Optional[float]=None, port: int=53, source: Optional[str]=None, source_port: int=0, ignore_unexpected: bool=False, one_rr_per_rrset: bool=False, ignore_trailing: bool=False, raise_on_truncation: bool=False, sock: Optional[Any]=None, ignore_errors: bool=False) -> dns.message.Message:
     """Return the response obtained after sending a query via UDP.
@@ -323,14 +460,40 @@ def _net_read(sock, count, expiration):
     A Timeout exception will be raised if the operation is not completed
     by the expiration time.
     """
-    pass
+    s = b''
+    while count > 0:
+        if expiration is not None:
+            timeout = _remaining(expiration)
+            if timeout <= 0.0:
+                raise dns.exception.Timeout
+            sock.settimeout(timeout)
+        try:
+            n = sock.recv(count)
+            if n == b'':
+                raise EOFError
+            count = count - len(n)
+            s = s + n
+        except socket.timeout:
+            raise dns.exception.Timeout
+    return s
 
 def _net_write(sock, data, expiration):
     """Write the specified data to the socket.
     A Timeout exception will be raised if the operation is not completed
     by the expiration time.
     """
-    pass
+    current = 0
+    l = len(data)
+    while current < l:
+        if expiration is not None:
+            timeout = _remaining(expiration)
+            if timeout <= 0.0:
+                raise dns.exception.Timeout
+            sock.settimeout(timeout)
+        try:
+            current += sock.send(data[current:])
+        except socket.timeout:
+            raise dns.exception.Timeout
 
 def send_tcp(sock: Any, what: Union[dns.message.Message, bytes], expiration: Optional[float]=None) -> Tuple[int, float]:
     """Send a DNS message to the specified TCP socket.
@@ -345,7 +508,15 @@ def send_tcp(sock: Any, what: Union[dns.message.Message, bytes], expiration: Opt
 
     Returns an ``(int, float)`` tuple of bytes sent and the sent time.
     """
-    pass
+    if isinstance(what, dns.message.Message):
+        what = what.to_wire()
+    l = len(what)
+    # Convert the 16-bit integer to network byte order
+    header = struct.pack("!H", l)
+    sent_time = time.time()
+    _net_write(sock, header, expiration)
+    _net_write(sock, what, expiration)
+    return (l + 2, sent_time)
 
 def receive_tcp(sock: Any, expiration: Optional[float]=None, one_rr_per_rrset: bool=False, keyring: Optional[Dict[dns.name.Name, dns.tsig.Key]]=None, request_mac: Optional[bytes]=b'', ignore_trailing: bool=False) -> Tuple[dns.message.Message, float]:
     """Read a DNS message from a TCP socket.
@@ -372,7 +543,14 @@ def receive_tcp(sock: Any, expiration: Optional[float]=None, one_rr_per_rrset: b
     Returns a ``(dns.message.Message, float)`` tuple of the received message
     and the received time.
     """
-    pass
+    ldata = _net_read(sock, 2, expiration)
+    (l,) = struct.unpack("!H", ldata)
+    wire = _net_read(sock, l, expiration)
+    received_time = time.time()
+    r = dns.message.from_wire(wire, keyring=keyring, request_mac=request_mac,
+                            one_rr_per_rrset=one_rr_per_rrset,
+                            ignore_trailing=ignore_trailing)
+    return (r, received_time)
 
 def tcp(q: dns.message.Message, where: str, timeout: Optional[float]=None, port: int=53, source: Optional[str]=None, source_port: int=0, one_rr_per_rrset: bool=False, ignore_trailing: bool=False, sock: Optional[Any]=None) -> dns.message.Message:
     """Return the response obtained after sending a query via TCP.
