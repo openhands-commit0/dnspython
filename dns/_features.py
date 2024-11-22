@@ -10,7 +10,15 @@ def _version_check(requirement: str) -> bool:
 
         package>=version
     """
-    pass
+    try:
+        package, version = requirement.split('>=')
+        installed_version = importlib.metadata.version(package)
+        # Convert versions to tuples for comparison
+        installed = tuple(int(x) for x in installed_version.split('.'))
+        required = tuple(int(x) for x in version.split('.'))
+        return installed >= required
+    except (importlib.metadata.PackageNotFoundError, ValueError):
+        return False
 _cache: Dict[str, bool] = {}
 
 def have(feature: str) -> bool:
@@ -23,7 +31,13 @@ def have(feature: str) -> bool:
     and ``False`` if it is not or if metadata is
     missing.
     """
-    pass
+    if feature in _cache:
+        return _cache[feature]
+    if feature not in _requirements:
+        return False
+    result = all(_version_check(requirement) for requirement in _requirements[feature])
+    _cache[feature] = result
+    return result
 
 def force(feature: str, enabled: bool) -> None:
     """Force the status of *feature* to be *enabled*.
@@ -31,5 +45,5 @@ def force(feature: str, enabled: bool) -> None:
     This method is provided as a workaround for any cases
     where importlib.metadata is ineffective, or for testing.
     """
-    pass
+    _cache[feature] = enabled
 _requirements: Dict[str, List[str]] = {'dnssec': ['cryptography>=41'], 'doh': ['httpcore>=1.0.0', 'httpx>=0.26.0', 'h2>=4.1.0'], 'doq': ['aioquic>=0.9.25'], 'idna': ['idna>=3.6'], 'trio': ['trio>=0.23'], 'wmi': ['wmi>=1.5.1']}
