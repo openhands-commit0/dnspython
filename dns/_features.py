@@ -3,6 +3,26 @@ import itertools
 import string
 from typing import Dict, List, Tuple
 
+def _tuple_from_text(text: str) -> Tuple[int, ...]:
+    """Convert version text like '1.2.3' or '1.2rc1' to a tuple of integers.
+    
+    Only includes numeric components, so '1.2rc1' becomes (1, 2).
+    """
+    if not text:
+        return ()
+    parts = []
+    for part in text.split('.'):
+        # Extract leading digits
+        digits = ''
+        for c in part:
+            if c.isdigit():
+                digits += c
+            else:
+                break
+        if digits:
+            parts.append(int(digits))
+    return tuple(parts)
+
 def _version_check(requirement: str) -> bool:
     """Is the requirement fulfilled?
 
