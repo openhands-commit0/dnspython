@@ -12,11 +12,11 @@ class Flag(enum.IntFlag):
     REVOKE = 128
     ZONE = 256
 
-@dns.immutable.immutable
 class DNSKEYBase(dns.rdata.Rdata):
     """Base class for rdata that is like a DNSKEY record"""
     __slots__ = ['flags', 'protocol', 'algorithm', 'key']
 
+    @dns.immutable.immutable
     def __init__(self, rdclass, rdtype, flags, protocol, algorithm, key):
         super().__init__(rdclass, rdtype)
         self.flags = Flag(self._as_uint16(flags))

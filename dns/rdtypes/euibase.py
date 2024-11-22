@@ -2,11 +2,11 @@ import binascii
 import dns.immutable
 import dns.rdata
 
-@dns.immutable.immutable
 class EUIBase(dns.rdata.Rdata):
     """EUIxx record"""
     __slots__ = ['eui']
 
+    @dns.immutable.immutable
     def __init__(self, rdclass, rdtype, eui):
         super().__init__(rdclass, rdtype)
         self.eui = self._as_bytes(eui)

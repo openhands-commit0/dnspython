@@ -33,20 +33,19 @@ class Emptiness(enum.IntEnum):
     ALLOWED = 2
 _escaped = b'",\\'
 
-@dns.immutable.immutable
 class Param:
     """Abstract base class for SVCB parameters"""
 
-@dns.immutable.immutable
 class GenericParam(Param):
     """Generic SVCB parameter"""
 
+    @dns.immutable.immutable
     def __init__(self, value):
         self.value = dns.rdata.Rdata._as_bytes(value, True)
 
-@dns.immutable.immutable
 class MandatoryParam(Param):
 
+    @dns.immutable.immutable
     def __init__(self, keys):
         keys = sorted([_validate_key(key)[0] for key in keys])
         prior_k = None
@@ -58,46 +57,45 @@ class MandatoryParam(Param):
                 raise ValueError('listed the mandatory key as mandatory')
         self.keys = tuple(keys)
 
-@dns.immutable.immutable
 class ALPNParam(Param):
 
+    @dns.immutable.immutable
     def __init__(self, ids):
         self.ids = dns.rdata.Rdata._as_tuple(ids, lambda x: dns.rdata.Rdata._as_bytes(x, True, 255, False))
 
-@dns.immutable.immutable
 class NoDefaultALPNParam(Param):
     pass
 
-@dns.immutable.immutable
 class PortParam(Param):
 
+    @dns.immutable.immutable
     def __init__(self, port):
         self.port = dns.rdata.Rdata._as_uint16(port)
 
-@dns.immutable.immutable
 class IPv4HintParam(Param):
 
+    @dns.immutable.immutable
     def __init__(self, addresses):
         self.addresses = dns.rdata.Rdata._as_tuple(addresses, dns.rdata.Rdata._as_ipv4_address)
 
-@dns.immutable.immutable
 class IPv6HintParam(Param):
 
+    @dns.immutable.immutable
     def __init__(self, addresses):
         self.addresses = dns.rdata.Rdata._as_tuple(addresses, dns.rdata.Rdata._as_ipv6_address)
 
-@dns.immutable.immutable
 class ECHParam(Param):
 
+    @dns.immutable.immutable
     def __init__(self, ech):
         self.ech = dns.rdata.Rdata._as_bytes(ech, True)
 _class_for_key = {ParamKey.MANDATORY: MandatoryParam, ParamKey.ALPN: ALPNParam, ParamKey.NO_DEFAULT_ALPN: NoDefaultALPNParam, ParamKey.PORT: PortParam, ParamKey.IPV4HINT: IPv4HintParam, ParamKey.ECH: ECHParam, ParamKey.IPV6HINT: IPv6HintParam}
 
-@dns.immutable.immutable
 class SVCBBase(dns.rdata.Rdata):
     """Base class for SVCB-like records"""
     __slots__ = ['priority', 'target', 'params']
 
+    @dns.immutable.immutable
     def __init__(self, rdclass, rdtype, priority, target, params):
         super().__init__(rdclass, rdtype)
         self.priority = self._as_uint16(priority)
