@@ -76,11 +76,11 @@ def _truncate_bitmap(what):
     return what[0:1]
 _constify = dns.immutable.constify
 
-@dns.immutable.immutable
 class Rdata:
     """Base class for all DNS rdata types."""
     __slots__ = ['rdclass', 'rdtype', 'rdcomment']
 
+    @dns.immutable.immutable
     def __init__(self, rdclass, rdtype):
         """Initialize an rdata.
 
@@ -287,7 +287,6 @@ class Rdata:
         
         return new_instance
 
-@dns.immutable.immutable
 class GenericRdata(Rdata):
     """Generic Rdata Class
 
@@ -296,6 +295,7 @@ class GenericRdata(Rdata):
     """
     __slots__ = ['data']
 
+    @dns.immutable.immutable
     def __init__(self, rdclass, rdtype, data):
         super().__init__(rdclass, rdtype)
         self.data = data
