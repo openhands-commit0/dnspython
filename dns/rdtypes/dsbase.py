@@ -5,12 +5,12 @@ import dns.immutable
 import dns.rdata
 import dns.rdatatype
 
-@dns.immutable.immutable
 class DSBase(dns.rdata.Rdata):
     """Base class for rdata that is like a DS record"""
     __slots__ = ['key_tag', 'algorithm', 'digest_type', 'digest']
     _digest_length_by_type = {1: 20, 2: 32, 3: 32, 4: 48}
 
+    @dns.immutable.immutable
     def __init__(self, rdclass, rdtype, key_tag, algorithm, digest_type, digest):
         super().__init__(rdclass, rdtype)
         self.key_tag = self._as_uint16(key_tag)

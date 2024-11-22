@@ -447,7 +447,34 @@ class BaseResolver:
 
     def reset(self) -> None:
         """Reset all resolver configuration to the defaults."""
-        pass
+        self.domain = dns.name.empty
+        self.nameserver_ports = {}
+        self.port = 53
+        self.search = []
+        self.use_search_by_default = True
+        self.timeout = 2.0
+        self.lifetime = 5.0
+        self.keyring = None
+        self.keyname = None
+        self.keyalgorithm = dns.name.from_text('HMAC-MD5.SIG-ALG.REG.INT')
+        self.edns = -1
+        self.ednsflags = 0
+        self.ednsoptions = None
+        self.payload = dns.message.DEFAULT_EDNS_PAYLOAD
+        self.cache = None
+        self.flags = None
+        self.retry_servfail = False
+        self.rotate = False
+        self.ndots = None
+        self._nameservers = []
+
+    @property
+    def nameservers(self) -> Sequence[Union[str, dns.nameserver.Nameserver]]:
+        """The nameservers to use for queries.
+
+        Raises ValueError if no nameservers are configured.
+        """
+        return self._nameservers
 
     def read_resolv_conf(self, f: Any) -> None:
         """Process *f* as a file in the /etc/resolv.conf format.  If f is
@@ -507,14 +534,16 @@ class BaseResolver:
 
     @nameservers.setter
     def nameservers(self, nameservers: Sequence[Union[str, dns.nameserver.Nameserver]]) -> None:
-        """
+        """Set the nameservers to use for queries.
+
         *nameservers*, a ``list`` of nameservers, where a nameserver is either
-        a string interpretable as a nameserver, or a ``dns.nameserver.Nameserver``
-        instance.
+        a string containing an IPv4 or IPv6 address, or a ``dns.nameserver.Nameserver``.
 
         Raises ``ValueError`` if *nameservers* is not a list of nameservers.
         """
-        pass
+        self._nameservers = list(nameservers)
+
+
 
 class Resolver(BaseResolver):
     """DNS stub resolver."""
