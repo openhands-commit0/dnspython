@@ -144,7 +144,43 @@ def _destination_and_source(where: str, port: int, source: Optional[str], source
 
     return (af, destination, source_tuple)
 
+def _make_dot_ssl_context(verify: Union[bool, str], server_hostname: Optional[str]=None) -> ssl.SSLContext:
+    """Create an SSL context for DoT.
+    
+    *verify*, a ``bool`` or ``str``. If a ``True``, then TLS certificate verification
+    of the server is done using the default CA bundle; if ``False``, then no
+    verification is done; if a ``str`` then it specifies the path to a certificate
+    file or directory which will be used for verification.
+
+    *server_hostname*, a ``str`` or ``None``, the server's hostname.
+    """
+    if verify is True:
+        ctx = ssl.create_default_context()
+        if server_hostname is None:
+            ctx.check_hostname = False
+    elif verify is False:
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS)
+        ctx.verify_mode = ssl.CERT_NONE
+    elif isinstance(verify, str):
+        ctx = ssl.create_default_context(cafile=verify)
+        if server_hostname is None:
+            ctx.check_hostname = False
+    else:
+        raise ValueError('verify must be True, False, or a string')
+    return ctx
+
 socket_factory = socket.socket
+
+class UDPMode(enum.IntEnum):
+    """What transport to use.
+
+    NEVER means always use TCP.
+    ONLY means always use UDP.
+    FIRST means try UDP and fallback to TCP if needed.
+    """
+    NEVER = 0
+    ONLY = 1
+    FIRST = 2
 
 class UnexpectedSource(dns.exception.DNSException):
     """A DNS query response came from an unexpected address or port."""
