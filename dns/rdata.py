@@ -299,6 +299,15 @@ class GenericRdata(Rdata):
     def __init__(self, rdclass, rdtype, data):
         super().__init__(rdclass, rdtype)
         self.data = data
+
+    def to_text(self, origin=None, relativize=True, **kw):
+        return r'\# %u %s' % (len(self.data), str(_hexify(self.data).decode()))
+
+    def to_wire(self, file=None, compress=None, origin=None, canonicalize=False):
+        if file:
+            file.write(self.data)
+        else:
+            return self.data
 _rdata_classes: Dict[Tuple[dns.rdataclass.RdataClass, dns.rdatatype.RdataType], Any] = {}
 _module_prefix = 'dns.rdtypes'
 
@@ -339,7 +348,34 @@ def from_text(rdclass: Union[dns.rdataclass.RdataClass, str], rdtype: Union[dns.
     Returns an instance of the chosen Rdata subclass.
 
     """
-    pass
+    rdclass = dns.rdataclass.RdataClass.make(rdclass)
+    rdtype = dns.rdatatype.RdataType.make(rdtype)
+
+    if isinstance(tok, str):
+        tok = dns.tokenizer.Tokenizer(tok, idna_codec=idna_codec)
+
+    # Get the class
+    rdclass_text = dns.rdataclass.to_text(rdclass)
+    rdtype_text = dns.rdatatype.to_text(rdtype)
+    mod = None
+    rdtype_cls = None
+    try:
+        mod_name = f"{_module_prefix}.{rdclass_text}.{rdtype_text}"
+        mod = import_module(mod_name)
+        rdtype_cls = getattr(mod, rdtype_text)
+    except (ImportError, AttributeError):
+        try:
+            mod_name = f"{_module_prefix}.ANY.{rdtype_text}"
+            mod = import_module(mod_name)
+            rdtype_cls = getattr(mod, rdtype_text)
+        except (ImportError, AttributeError):
+            rdtype_cls = GenericRdata
+
+    # Call from_text() on the class
+    if relativize_to is None:
+        relativize_to = origin
+    return rdtype_cls.from_text(rdclass, rdtype, tok, origin, relativize,
+                               relativize_to)
 
 def from_wire_parser(rdclass: Union[dns.rdataclass.RdataClass, str], rdtype: Union[dns.rdatatype.RdataType, str], parser: dns.wire.Parser, origin: Optional[dns.name.Name]=None) -> Rdata:
     """Build an rdata object from wire format
@@ -364,7 +400,28 @@ def from_wire_parser(rdclass: Union[dns.rdataclass.RdataClass, str], rdtype: Uni
 
     Returns an instance of the chosen Rdata subclass.
     """
-    pass
+    rdclass = dns.rdataclass.RdataClass.make(rdclass)
+    rdtype = dns.rdatatype.RdataType.make(rdtype)
+
+    # Get the class
+    rdclass_text = dns.rdataclass.to_text(rdclass)
+    rdtype_text = dns.rdatatype.to_text(rdtype)
+    mod = None
+    rdtype_cls = None
+    try:
+        mod_name = f"{_module_prefix}.{rdclass_text}.{rdtype_text}"
+        mod = import_module(mod_name)
+        rdtype_cls = getattr(mod, rdtype_text)
+    except (ImportError, AttributeError):
+        try:
+            mod_name = f"{_module_prefix}.ANY.{rdtype_text}"
+            mod = import_module(mod_name)
+            rdtype_cls = getattr(mod, rdtype_text)
+        except (ImportError, AttributeError):
+            rdtype_cls = GenericRdata
+
+    # Call from_wire() on the class
+    return rdtype_cls.from_wire_parser(rdclass, rdtype, parser, origin)
 
 def from_wire(rdclass: Union[dns.rdataclass.RdataClass, str], rdtype: Union[dns.rdatatype.RdataType, str], wire: bytes, current: int, rdlen: int, origin: Optional[dns.name.Name]=None) -> Rdata:
     """Build an rdata object from wire format
@@ -393,7 +450,9 @@ def from_wire(rdclass: Union[dns.rdataclass.RdataClass, str], rdtype: Union[dns.
 
     Returns an instance of the chosen Rdata subclass.
     """
-    pass
+    parser = dns.wire.Parser(wire, current)
+    with parser.restrict_to(rdlen):
+        return from_wire_parser(rdclass, rdtype, parser, origin)
 
 class RdatatypeExists(dns.exception.DNSException):
     """DNS rdatatype already exists."""
@@ -416,4 +475,7 @@ def register_type(implementation: Any, rdtype: int, rdtype_text: str, is_singlet
     *rdclass*, the rdataclass of the type, or ``dns.rdataclass.ANY`` if
     it applies to all classes.
     """
-    pass
+    existing_cls = _rdata_classes.get((rdclass, rdtype))
+    if existing_cls is not None:
+        raise RdatatypeExists(rdclass=rdclass, rdtype=rdtype)
+    _rdata_classes[(rdclass, rdtype)] = implementation
